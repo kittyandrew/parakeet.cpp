@@ -343,7 +343,10 @@ ctest --test-dir build --output-on-failure -LE model     # no model files needed
 
 Tests labelled `model` need a converted checkpoint (set `PARAKEET_TEST_GGUF` and the other variables listed in AGENTS.md) and skip with exit code 77 when it is missing.
 
-**Community projects** (not maintained by the core team): [parakeet-ios-demo](https://github.com/Kashif-E/parakeet-ios-demo), live on-device streaming speech-to-text on iOS (SwiftUI) over the streaming C API, by [@Kashif-E](https://github.com/Kashif-E).
+**Community projects** (not maintained by the core team):
+
+- [parakeet-ios-demo](https://github.com/Kashif-E/parakeet-ios-demo): live on-device streaming speech-to-text on iOS (SwiftUI) over the streaming C API, by [@Kashif-E](https://github.com/Kashif-E).
+- [parakeet-ffm](https://github.com/jvoice-project/parakeet-ffm): Java wrapper for the C API using the Foreign Function & Memory (FFM) API. See its README for Java requirements and setup.
 
 ---
 
