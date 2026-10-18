@@ -4,6 +4,9 @@
 #include <vector>
 #include <cstdint>
 
+struct ggml_context;
+struct ggml_tensor;
+
 namespace pk {
 
 // Carries the LSTM hidden and cell state for stateful single-step decoding.
@@ -74,6 +77,13 @@ public:
               const PredState& in,
               std::vector<float>& g,
               PredState& out_state) const;
+
+    // The graph of step() inside a caller's graph, so a caller can chain the joint onto it. Registers
+    // x0 and the state as inputs and out_state as captures; returns the top layer's h' [hidden]. x0 is
+    // scratch for the layer-0 input and must outlive the compute.
+    ggml_tensor* build_step(ggml_context* ctx, int32_t token_id, bool is_sos,
+                            const PredState& in, std::vector<float>& x0,
+                            PredState& out_state) const;
 
     // Advance the LSTM one token for N items at once.
     // token_ids[n]: embedding index for item n (ignored where is_sos[n]).
