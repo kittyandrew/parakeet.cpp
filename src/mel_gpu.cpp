@@ -62,16 +62,6 @@ void GpuMel::compute(const std::vector<float>& samples,
     const int n_bins_  = k_.n_bins_;
     const float preemph_ = k_.preemph_;
 
-    // ----- Preemphasis (double, exactly like MelFrontend) -----
-    std::vector<double> x((size_t)S);
-    if (preemph_ > 0.0f && S > 0) {
-        x[0] = samples[0];
-        for (int t = 1; t < S; ++t)
-            x[t] = (double)samples[t] - (double)preemph_ * (double)samples[t - 1];
-    } else {
-        for (int t = 0; t < S; ++t) x[t] = samples[t];
-    }
-
     const int seq_len = (S > 0) ? (S / hop_) : 0;
 
     // ----- Center zero-pad (constant), then frame count (identical to MelFrontend) -----
@@ -81,9 +71,6 @@ void GpuMel::compute(const std::vector<float>& samples,
     T = n_frames;
     n_mels = n_mels_;
 
-    std::vector<double> padded((size_t)padded_len, 0.0);
-    for (int j = 0; j < S; ++j) padded[pad + j] = x[j];
-
     feats.assign((size_t)n_mels_ * T, 0.0f);
     if (T == 0) {
         // Mirror MelFrontend: per_feature norm over zero frames is a no-op.
@@ -91,14 +78,21 @@ void GpuMel::compute(const std::vector<float>& samples,
     }
 
     // ----- Windowed frame matrix Xw [T, n_fft] row-major (row t = frame t) -----
-    // Xw[t*n_fft + i] = (float)(padded[t*hop + i] * (double)window_[i]). Matches
-    // MelFrontend's per-frame windowing exactly.
+    // Xw[t*n_fft + i] = (float)(padded[t*hop + i] * (double)window_[i]), where padded is the preemphasized
+    // signal (in double, exactly like MelFrontend) centred in n_fft/2 zeros. Each padded sample is computed
+    // where it is read, so no copy of the signal is allocated: two such double arrays took ~7 ms per minute.
+    auto padded = [&](int j) -> double {
+        const int t = j - pad;
+        if (t < 0 || t >= S) return 0.0;
+        if (preemph_ > 0.0f && t > 0) return (double)samples[t] - (double)preemph_ * (double)samples[t - 1];
+        return samples[t];
+    };
     std::vector<float> Xw((size_t)T * n_fft_);
     for (int t = 0; t < T; ++t) {
         const int start = t * hop_;
         float* row = &Xw[(size_t)t * n_fft_];
         for (int i = 0; i < n_fft_; ++i)
-            row[i] = (float)(padded[(size_t)start + i] * (double)k_.window_[i]);
+            row[i] = (float)(padded(start + i) * (double)k_.window_[i]);
     }
 
     // ----- ggml graph: DFT-matmul -> power -> filterbank -> log -> feat-major -----
