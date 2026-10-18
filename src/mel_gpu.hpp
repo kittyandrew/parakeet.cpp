@@ -1,5 +1,6 @@
 #pragma once
 #include "mel.hpp"            // reuse MelKernel for config + window_ + fb_
+#include <memory>
 #include <vector>
 namespace pk {
 
@@ -12,6 +13,10 @@ namespace pk {
 //
 // Numerics differ from MelFrontend only by the FFT->DFT-matmul substitution
 // (f32 matmul vs the float radix-2 rfft), which is a small per-element delta.
+struct DftBasis {
+    std::vector<float> cos, sin;
+};
+
 class GpuMel {
 public:
     explicit GpuMel(const ModelLoader& ml);
@@ -21,8 +26,8 @@ public:
                  int& n_mels, int& T) const;
 private:
     MelKernel k_;                 // window_, fb_, n_fft_, hop_, n_mels_, n_bins_, ...
-    std::vector<float> dft_cos_;  // [n_bins, n_fft] row-major: cos(2*pi*b*n/n_fft)
-    std::vector<float> dft_sin_;  // [n_bins, n_fft] row-major: -sin(2*pi*b*n/n_fft)
+    // [n_bins, n_fft] row-major cos(2*pi*b*n/n_fft) and -sin(...), built once per size: a GpuMel is made per call.
+    std::shared_ptr<const DftBasis> dft_;
 };
 
 } // namespace pk
