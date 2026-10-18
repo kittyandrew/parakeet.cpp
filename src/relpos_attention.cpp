@@ -140,6 +140,10 @@ ggml_tensor* RelPosAttention::build_graph(ggml_context* ctx, ggml_tensor* xt,
     const int chunk_size  = chunked_limited_ ? (att_right_ + 1) : 0;
     const int left_chunks = (chunked_limited_ && chunk_size > 0)
                             ? (att_left_ / chunk_size) : 0;
+    // A full-context clip without padding masks nothing: skip building and uploading T*T zeros per layer.
+    const bool unmasked = valid_len >= T && !chunked_limited_ && att_left < 0;
+    ggml_tensor* mask = nullptr;
+    if (!unmasked) {
     std::vector<float>& mask_host = pool.alloc_f32((size_t)T * T);
     {
         float* md = mask_host.data();
@@ -168,8 +172,9 @@ ggml_tensor* RelPosAttention::build_graph(ggml_context* ctx, ggml_tensor* xt,
         }
     }
     int64_t mask_ne[2] = {T, T};
-    ggml_tensor* mask = pk::graph_input_tensor(ctx, GGML_TYPE_F32, 2, mask_ne,
+    mask = pk::graph_input_tensor(ctx, GGML_TYPE_F32, 2, mask_ne,
                             mask_host.data(), mask_host.size() * sizeof(float));
+    }
     ggml_tensor* attn = ggml_soft_max_ext(ctx, scores, mask, scale, 0.0f); // [T_k, T_q, H]
 
     // ---- context = attn @ v -> [dk, T_q, H] ----
