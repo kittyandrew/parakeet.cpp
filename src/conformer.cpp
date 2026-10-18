@@ -28,6 +28,25 @@ static ggml_tensor* clone_weight_opt(ggml_context* ctx, const ModelLoader& ml,
     return pk::clone_weight_opt(ctx, ml, name.c_str());
 }
 
+// Depthwise Conv1d (groups = C) as one SSM_CONV over the input padded to
+// T + K - 1 frames: out[c, t] = sum_k xp[t + k, c] * w[k, c], which is NeMo's
+// conv for the same left padding. It replaces im2col + mul_mat and both
+// transposes, and takes the batch on ne2. x_tcb [T, C, B] -> [C, T, B].
+// Null, for the im2col path, on the CPU (SSM_CONV was no faster there, and the
+// NeMo parity tests stay bit-identical), for a K that ggml-cuda has no kernel
+// for (it aborts on one), and when the backend cannot run the op, which would
+// send the whole graph through the scheduler's CPU fallback.
+static ggml_tensor* depthwise_conv_ssm(ggml_context* ctx, ggml_tensor* x_tcb,
+                                       ggml_tensor* dww, int K, int left_pad) {
+    if (active_backend_is_cpu() || !(K == 3 || K == 4 || K == 5 || K == 9 || K == 15)) {
+        return nullptr;
+    }
+    ggml_tensor* xp = ggml_pad_ext(ctx, x_tcb, left_pad, K - 1 - left_pad,
+                                   0, 0, 0, 0, 0, 0); // [T+K-1, C, B]
+    ggml_tensor* y = ggml_ssm_conv(ctx, xp, ggml_reshape_2d(ctx, dww, K, x_tcb->ne[1]));
+    return active_backend_supports(xp) && active_backend_supports(y) ? y : nullptr;
+}
+
 // Build the ConformerConvolution sub-graph (everything AFTER norm_conv) on the
 // conv input `c` (= norm_conv(residual)), ne [D, T, B] (channels fastest, batch
 // on ne2). Returns the conv output tensor, ne [D, T, B]. See header for the NeMo
@@ -85,12 +104,14 @@ static ggml_tensor* build_conv_module(ggml_context* ctx, const ModelLoader& ml,
         glu = ggml_mul(ctx, glu, tmask);
     }
 
-    // -- depthwise_conv (Conv1d d->d, k=K, groups=d). F32 im2col throughout.
+    // -- depthwise_conv (Conv1d d->d, k=K, groups=d): SSM_CONV where the GPU runs it, else im2col.
     // Transpose ne0<->ne1 (keep batch on ne2): [D,T,B] -> [T,C,B].
     ggml_tensor* glu_tcb = ggml_cont(ctx, ggml_permute(ctx, glu, 1, 0, 2, 3)); // [T, C, B]
     ggml_tensor* dww = clone_weight(ctx, ml, pre + "conv.depthwise_conv.weight"); // [K,1,C]
-    ggml_tensor* dw = nullptr;
-    {
+    // [C, T, B], or null for the im2col path below.
+    ggml_tensor* dwt = depthwise_conv_ssm(ctx, glu_tcb, dww, K, conv_causal ? K - 1 : pad);
+    if (!dwt) {
+        ggml_tensor* dw = nullptr;
         // ggml's 1D im2col asserts b->ne[3] == 1, so the depthwise conv cannot
         // take a batch dim. Run it per item (each slice has ne[3]==1, exactly the
         // B=1 path) and reassemble along the batch axis. For B==1 the loop runs
@@ -123,11 +144,10 @@ static ggml_tensor* build_conv_module(ggml_context* ctx, const ModelLoader& ml,
             // reassemble along ne2 (batch). For B==1 there is no concat.
             dw = (dw == nullptr) ? item_dw : ggml_concat(ctx, dw, item_dw, /*dim*/2);
         }
-        // dw is [OW=T, C, B].
+        // dw is [OW=T, C, B]; transpose ne0<->ne1 (keep batch on ne2): [T,C,B] -> [C,T,B].
+        dwt = ggml_cont(ctx, ggml_permute(ctx, dw, 1, 0, 2, 3));
     }
     ggml_tensor* dwb = clone_weight_opt(ctx, ml, pre + "conv.depthwise_conv.bias"); // [C]
-    // transpose ne0<->ne1 (keep batch on ne2): [T,C,B] -> [C,T,B].
-    ggml_tensor* dwt = ggml_cont(ctx, ggml_permute(ctx, dw, 1, 0, 2, 3)); // [C, T, B]
     if (dwb) dwt = ggml_add(ctx, dwt, dwb);               // broadcast [C] over T,B
 
     // -- norm (between depthwise conv and SiLU).
@@ -218,11 +238,13 @@ static ggml_tensor* build_conv_module(ggml_context* ctx, const ModelLoader& ml,
         glu = ggml_mul(ctx, glu, tmask);
     }
 
-    // -- depthwise_conv (Conv1d d->d, k=K, groups=d). F32 im2col throughout.
+    // -- depthwise_conv (Conv1d d->d, k=K, groups=d): SSM_CONV where the GPU runs it, else im2col.
     ggml_tensor* glu_tc = ggml_cont(ctx, ggml_transpose(ctx, glu)); // [T, C]
     ggml_tensor* dww = clone_weight(ctx, ml, pre + "conv.depthwise_conv.weight"); // [K,1,C]
-    ggml_tensor* dw;
-    {
+    ggml_tensor* dwt = depthwise_conv_ssm(ctx, glu_tc, dww, K, conv_causal ? K - 1 : pad); // [C, T, 1]
+    if (dwt) {
+        dwt = ggml_reshape_2d(ctx, dwt, D, T);
+    } else {
         ggml_tensor* nb = ggml_reshape_4d(ctx, glu_tc,
                               glu_tc->ne[0], 1, glu_tc->ne[1], 1); // [T,1,C,1]
         ggml_tensor* ic;
@@ -238,11 +260,11 @@ static ggml_tensor* build_conv_module(ggml_context* ctx, const ModelLoader& ml,
                              /*is_2D*/false, GGML_TYPE_F32);
         }
         ggml_tensor* r2 = ggml_mul_mat(ctx, ic, dww);
-        dw = ggml_reshape_3d(ctx, r2, r2->ne[0], r2->ne[2], 1); // [OW=T, C, 1]
+        ggml_tensor* dw = ggml_reshape_3d(ctx, r2, r2->ne[0], r2->ne[2], 1); // [OW=T, C, 1]
+        dw = ggml_reshape_2d(ctx, dw, T, D);                  // [T, C]
+        dwt = ggml_cont(ctx, ggml_transpose(ctx, dw));
     }
-    dw = ggml_reshape_2d(ctx, dw, T, D);                  // [T, C]
     ggml_tensor* dwb = clone_weight_opt(ctx, ml, pre + "conv.depthwise_conv.bias"); // [C]
-    ggml_tensor* dwt = ggml_cont(ctx, ggml_transpose(ctx, dw)); // [C, T]
     if (dwb) dwt = ggml_add(ctx, dwt, dwb);               // broadcast [C] over T
 
     // -- norm (between depthwise conv and SiLU).

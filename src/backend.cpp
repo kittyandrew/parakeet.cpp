@@ -181,6 +181,11 @@ bool active_backend_is_cpu() {
     return t_active != nullptr && t_active->is_cpu();
 }
 
+bool active_backend_supports(const ggml_tensor* op) {
+    return t_active != nullptr && t_active->handle() != nullptr &&
+           ggml_backend_supports_op(t_active->handle(), op);
+}
+
 size_t Backend::graph_alloc_bytes() const {
     return impl_ ? impl_->alloc_bytes.load(std::memory_order_relaxed) : 0;
 }
