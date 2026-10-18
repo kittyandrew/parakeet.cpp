@@ -65,11 +65,14 @@ ggml_tensor* PredictionNet::build_step(ggml_context* ctx, int32_t token_id, bool
     const int H = H_;
     const int L = n_layers_;
 
+    // Fetched even for SOS: a caller's warm-up on silence emits no token, and must still pay this 21 MB read.
+    const float* embed_host = embed_table();
+
     // Layer-0 input: zeros for SOS, else the embedding row for token_id.
     x0.assign((size_t)H, 0.0f);
     if (!is_sos) {
         assert(token_id >= 0 && token_id < vocab_p1_ && "embedding id out of range");
-        std::memcpy(x0.data(), embed_table() + (size_t)token_id * H,
+        std::memcpy(x0.data(), embed_host + (size_t)token_id * H,
                     (size_t)H * sizeof(float));
     }
 
