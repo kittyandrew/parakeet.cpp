@@ -117,14 +117,11 @@ ggml_tensor* RelPosAttention::build_graph(ggml_context* ctx, ggml_tensor* xt,
 
     // ---- bd = q_v @ p^T -> [P(pos), T(query), H], then rel_shift -> [T,T,H] ----
     ggml_tensor* bd = ggml_mul_mat(ctx, ph, qv); // [P, T, H]
-    bd = ggml_pad_ext(ctx, bd, /*lp0*/1, /*rp0*/0, 0,0, 0,0, 0,0); // [P+1=2T, T, H]
-    bd = ggml_reshape_3d(ctx, bd, T, 2 * T, H);                    // [T, 2T, H]
-    bd = ggml_view_3d(ctx, bd, T, 2 * T - 1, H,
-                      bd->nb[1], bd->nb[2], bd->nb[1]);            // [T, 2T-1, H]
-    bd = ggml_cont(ctx, bd);
-    bd = ggml_reshape_3d(ctx, bd, 2 * T - 1, T, H);               // [2T-1, T, H]
-    bd = ggml_view_3d(ctx, bd, T, T, H, bd->nb[1], bd->nb[2], 0);
-    bd = ggml_cont(ctx, bd);
+    // NeMo's rel_shift (pad one column, reshape, drop a row, slice) leaves bd[T-1-q+j, q] at (key j,
+    // query q). A view reads exactly that without copying [P, T, H] three times: start at position T-1
+    // and step one element back for each query row.
+    bd = ggml_view_3d(ctx, bd, T, T, H, bd->nb[1] - bd->nb[0], bd->nb[2],
+                      (size_t)(T - 1) * bd->nb[0]);                // [T, T, H]
 
     // ---- scores = ac + bd ; softmax(scores*scale + mask) ----
     ggml_tensor* scores = ggml_add(ctx, ac, bd); // [T_k, T_q, H]
