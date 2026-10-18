@@ -102,11 +102,11 @@ void PredictionNet::step(int32_t token_id, bool is_sos,
             ggml_tensor* z = ggml_add(ctx,
                 ggml_add(ctx, ggml_mul_mat(ctx, Wih, layer_in), bih),
                 ggml_add(ctx, ggml_mul_mat(ctx, Whh, h_in),     bhh));
-            // Gate slices (i, f, g, o), each [H], contiguous for elementwise ops.
-            ggml_tensor* i  = ggml_sigmoid(ctx, ggml_cont(ctx, ggml_view_1d(ctx, z, H, 0)));
-            ggml_tensor* f  = ggml_sigmoid(ctx, ggml_cont(ctx, ggml_view_1d(ctx, z, H, (size_t)H * sizeof(float))));
-            ggml_tensor* gg = ggml_tanh   (ctx, ggml_cont(ctx, ggml_view_1d(ctx, z, H, (size_t)2 * H * sizeof(float))));
-            ggml_tensor* o  = ggml_sigmoid(ctx, ggml_cont(ctx, ggml_view_1d(ctx, z, H, (size_t)3 * H * sizeof(float))));
+            // Gate slices (i, f, g, o), each [H]. A 1-D view is already contiguous, so the gates need no copies.
+            ggml_tensor* i  = ggml_sigmoid(ctx, ggml_view_1d(ctx, z, H, 0));
+            ggml_tensor* f  = ggml_sigmoid(ctx, ggml_view_1d(ctx, z, H, (size_t)H * sizeof(float)));
+            ggml_tensor* gg = ggml_tanh   (ctx, ggml_view_1d(ctx, z, H, (size_t)2 * H * sizeof(float)));
+            ggml_tensor* o  = ggml_sigmoid(ctx, ggml_view_1d(ctx, z, H, (size_t)3 * H * sizeof(float)));
             // c' = f*c_in + i*g ;  h' = o*tanh(c')
             ggml_tensor* c_out = ggml_add(ctx, ggml_mul(ctx, f, c_in), ggml_mul(ctx, i, gg));
             ggml_tensor* h_out = ggml_mul(ctx, o, ggml_tanh(ctx, c_out));
