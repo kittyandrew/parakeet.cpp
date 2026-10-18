@@ -10,6 +10,8 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+#include <map>
+#include <mutex>
 #include <vector>
 
 namespace pk {
@@ -18,24 +20,32 @@ namespace pk {
 // Kept identical to MelFrontend::compute so the per-feature norm matches.
 static constexpr double kNormEps = 1e-5;
 
-GpuMel::GpuMel(const ModelLoader& ml) : k_(ml) {
+static std::shared_ptr<const DftBasis> dft_basis(int N, int B) {
+    static std::mutex mu;
+    static std::map<std::pair<int, int>, std::shared_ptr<const DftBasis>> cache;
+    std::lock_guard<std::mutex> lock(mu);
+    std::shared_ptr<const DftBasis>& entry = cache[{N, B}];
+    if (entry) return entry;
     // DFT basis matching pk::rfft's convention (no normalization), so the matmul
     // re/im equal the FFT's:  re[b] =  Σ_n x[n] cos(2π b n / N)
     //                         im[b] = -Σ_n x[n] sin(2π b n / N)
-    // Row-major [n_bins, n_fft]: dft_cos_[b*n_fft + n], dft_sin_[b*n_fft + n].
-    const int N = k_.n_fft_;
-    const int B = k_.n_bins_;
-    dft_cos_.assign((size_t)B * N, 0.0f);
-    dft_sin_.assign((size_t)B * N, 0.0f);
+    // Row-major [n_bins, n_fft]: cos[b*n_fft + n], sin[b*n_fft + n].
+    auto basis = std::make_shared<DftBasis>();
+    basis->cos.assign((size_t)B * N, 0.0f);
+    basis->sin.assign((size_t)B * N, 0.0f);
     const double two_pi = 2.0 * M_PI;
     for (int b = 0; b < B; ++b) {
         for (int n = 0; n < N; ++n) {
             const double ang = two_pi * (double)b * (double)n / (double)N;
-            dft_cos_[(size_t)b * N + n] = (float)std::cos(ang);
-            dft_sin_[(size_t)b * N + n] = (float)(-std::sin(ang));
+            basis->cos[(size_t)b * N + n] = (float)std::cos(ang);
+            basis->sin[(size_t)b * N + n] = (float)(-std::sin(ang));
         }
     }
+    entry = basis;
+    return entry;
 }
+
+GpuMel::GpuMel(const ModelLoader& ml) : k_(ml), dft_(dft_basis(k_.n_fft_, k_.n_bins_)) {}
 
 void GpuMel::compute(const std::vector<float>& samples,
                      std::vector<float>& feats, int& n_mels, int& T) const {
@@ -102,9 +112,9 @@ void GpuMel::compute(const std::vector<float>& samples,
             // DFT basis: ne=[n_fft, n_bins] (row b over n).
             int64_t basis_ne[2] = { n_fft_, n_bins_ };
             ggml_tensor* cosb = pk::graph_input_tensor(ctx, GGML_TYPE_F32, 2, basis_ne,
-                                    dft_cos_.data(), (size_t)n_bins_ * n_fft_ * sizeof(float));
+                                    dft_->cos.data(), (size_t)n_bins_ * n_fft_ * sizeof(float));
             ggml_tensor* sinb = pk::graph_input_tensor(ctx, GGML_TYPE_F32, 2, basis_ne,
-                                    dft_sin_.data(), (size_t)n_bins_ * n_fft_ * sizeof(float));
+                                    dft_->sin.data(), (size_t)n_bins_ * n_fft_ * sizeof(float));
 
             // re[t][b] = Σ_n cos(b,n) * Xw[t][n]; im likewise. -> ne=[n_bins, T].
             ggml_tensor* re = ggml_mul_mat(ctx, cosb, xw);
