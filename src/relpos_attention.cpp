@@ -48,6 +48,15 @@ static ggml_tensor* attn_linear(ggml_context* ctx, const ModelLoader& ml,
     return y;
 }
 
+ggml_tensor* rel_shift(ggml_context* ctx, ggml_tensor* bd) {
+    // NeMo's rel_shift (pad one column, reshape, drop a row, slice) leaves bd[T-1-q+j, q] at (key j,
+    // query q). A view reads exactly that without copying [P, T, H] three times: start at position T-1
+    // and step one element back for each query row.
+    const int64_t T = bd->ne[1];
+    return ggml_view_3d(ctx, bd, T, T, bd->ne[2], bd->nb[1] - bd->nb[0], bd->nb[2],
+                        (size_t)(T - 1) * bd->nb[0]); // [T, T, H]
+}
+
 // Additive mask [T_k, T_q]: 0 where query qi may attend to key kj, -inf
 // otherwise. (1) pad mask: key kj valid iff kj < valid_len. (2) chunked-
 // limited window for streaming models. See header / NeMo _create_masks.
@@ -156,12 +165,7 @@ ggml_tensor* RelPosAttention::build_graph(ggml_context* ctx, ggml_tensor* xt,
     ggml_tensor* ac = ggml_mul_mat(ctx, kh, qu); // [T(key), T(query), H]
 
     // ---- bd = q_v @ p^T -> [P(pos), T(query), H], then rel_shift -> [T,T,H] ----
-    ggml_tensor* bd = ggml_mul_mat(ctx, ph, qv); // [P, T, H]
-    // NeMo's rel_shift (pad one column, reshape, drop a row, slice) leaves bd[T-1-q+j, q] at (key j,
-    // query q). A view reads exactly that without copying [P, T, H] three times: start at position T-1
-    // and step one element back for each query row.
-    bd = ggml_view_3d(ctx, bd, T, T, H, bd->nb[1] - bd->nb[0], bd->nb[2],
-                      (size_t)(T - 1) * bd->nb[0]);                // [T, T, H]
+    ggml_tensor* bd = rel_shift(ctx, ggml_mul_mat(ctx, ph, qv)); // [P, T, H] -> [T, T, H]
 
     // ---- scores = ac + bd ; softmax(scores*scale + mask) ----
     ggml_tensor* scores = ggml_add(ctx, ac, bd); // [T_k, T_q, H]

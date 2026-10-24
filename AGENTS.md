@@ -140,6 +140,9 @@ tests/               ctest targets
                        test_backend_readback_gpu.cpp, Backend::compute on each GPU device: every capture and the output hold this compute's values, gallocr and scheduler paths (label gpu; 77 without a GPU)
                        test_pred_joint_step.cpp, fused prediction + joint step == the separate graphs, step() == a host LSTM, SOS fetches the embedding table (PARAKEET_TEST_GGUF; --gpu: ctest test_pred_joint_step_gpu, label gpu)
                        test_mel_gpu_frames.cpp , GpuMel's framing == the two-copy framing it replaced, bit for bit (model-independent)
+                       test_rel_shift.cpp      , strided rel_shift view and the scores ac + rel_shift(bd) == NeMo's rel_shift, bit for bit (model-independent)
+                       test_relpos_attention_gpu.cpp, on each GPU device: the strided scores add, and softmax without a mask == with a zero mask (label gpu; 77 without a GPU)
+                       relpos_cases.hpp        , NeMo rel_shift on the host, shared by the two above
                        test_capi_concurrency.cpp, set_concurrency + concurrent last_error writes (PARAKEET_TEST_GGUF)
                        test_pool_stress.cpp    , N threads x K backends == single-thread results; PARAKEET_STRESS_QUICK=1 for slow builds (PARAKEET_TEST_GGUF, _ULTRA, _REDUX_KEEP)
                        test_pool_shutdown.cpp  , pool create/destroy leaves no threads, results equal (PARAKEET_TEST_GGUF)
@@ -277,7 +280,7 @@ Ultra/Redux tests read `PARAKEET_TEST_GGUF_ULTRA` (F16 Ultra),
 | ------- | ------------------------------------------------------------ | ------------------ |
 | (none)  | `test_smoke`, `test_audio_io`, `test_fft`                    | nothing            |
 | `model` | `test_model_loader`, `test_capi`, `test_transcribe_*`, `check_*` | venv + checkpoint  |
-| `gpu`   | `test_depthwise_conv_gpu`, `test_mel_gpu_device`, `test_backend_readback_gpu`, `test_pred_joint_step_gpu`; each exits 77 without a GPU device | a GPU build + GPU  |
+| `gpu`   | `test_depthwise_conv_gpu`, `test_mel_gpu_device`, `test_backend_readback_gpu`, `test_pred_joint_step_gpu`, `test_relpos_attention_gpu`; each exits 77 without a GPU device | a GPU build + GPU  |
 
 ## Converting a model
 
