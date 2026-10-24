@@ -128,6 +128,11 @@ tests/               ctest targets
                        test_audio_io.cpp       , wav load + resample (model-independent)
                        test_fft.cpp            , FFT cross-check (model-independent)
                        test_backend_pool.cpp   , backend pool routing, limits, reentrancy, shutdown (model-independent)
+                       test_depthwise_conv.cpp , conv module's depthwise conv: SSM_CONV and im2col == NeMo's conv on the CPU backend (model-independent)
+                       test_depthwise_conv_path.cpp, when the depthwise conv falls back to im2col (model-independent)
+                       test_depthwise_conv_gpu.cpp, depthwise conv on each GPU device: SSM_CONV chosen, == CPU im2col (label gpu; 77 without a GPU)
+                       depthwise_conv_cases.hpp, NeMo's depthwise conv on the host and a run of the builder, shared by the three above
+                       gpu_devices.hpp         , GPU device list and skip helper for the gpu-labelled tests
                        test_capi_concurrency.cpp, set_concurrency + concurrent last_error writes (PARAKEET_TEST_GGUF)
                        test_pool_stress.cpp    , N threads x K backends == single-thread results; PARAKEET_STRESS_QUICK=1 for slow builds (PARAKEET_TEST_GGUF, _ULTRA, _REDUX_KEEP)
                        test_pool_shutdown.cpp  , pool create/destroy leaves no threads, results equal (PARAKEET_TEST_GGUF)
@@ -265,6 +270,7 @@ Ultra/Redux tests read `PARAKEET_TEST_GGUF_ULTRA` (F16 Ultra),
 | ------- | ------------------------------------------------------------ | ------------------ |
 | (none)  | `test_smoke`, `test_audio_io`, `test_fft`                    | nothing            |
 | `model` | `test_model_loader`, `test_capi`, `test_transcribe_*`, `check_*` | venv + checkpoint  |
+| `gpu`   | `test_depthwise_conv_gpu`; each runs on every GPU device and exits 77 without one | a GPU build + GPU  |
 
 ## Converting a model
 
