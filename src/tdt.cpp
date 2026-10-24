@@ -10,6 +10,16 @@
 
 namespace pk {
 
+bool pred_joint_step(const PredictionNet& pred, const Joint& joint, int32_t token_id, bool is_sos,
+                     const PredState& in, const float* enc_proj_t, std::vector<float>& x0,
+                     std::vector<float>& g, PredState& out_state, std::vector<float>& logits) {
+    return pk::run_graph(0, 0, [&](ggml_context* ctx) -> ggml_tensor* {
+        ggml_tensor* gt = pred.build_step(ctx, token_id, is_sos, in, x0, out_state);
+        pk::capture_graph_output(gt, &g);
+        return joint.build_step(ctx, enc_proj_t, gt);
+    }, logits);
+}
+
 std::vector<int32_t> tdt_greedy(const PredictionNet& pred, const Joint& joint,
                                 const std::vector<float>& enc, int T, int enc_hidden,
                                 const std::vector<int32_t>& durations,
@@ -74,11 +84,8 @@ std::vector<int32_t> tdt_greedy(const PredictionNet& pred, const Joint& joint,
                 // The prediction step and this joint run as one graph: on a GPU each compute is a round trip.
                 const bool is_sos = !emitted_any;
                 const int32_t last_label = emitted_any ? last_token : blank_id;
-                bool ok = pk::run_graph(0, 0, [&](ggml_context* ctx) -> ggml_tensor* {
-                    ggml_tensor* gt = pred.build_step(ctx, last_label, is_sos, committed, x0, out_state);
-                    pk::capture_graph_output(gt, &g);
-                    return joint.build_step(ctx, enc_proj.data() + (size_t)t * H, gt);
-                }, logits);
+                bool ok = pred_joint_step(pred, joint, last_label, is_sos, committed,
+                                          enc_proj.data() + (size_t)t * H, x0, g, out_state, logits);
                 assert(ok && "fused pred-net + joint step graph failed");
                 (void)ok;
                 g_valid = true;

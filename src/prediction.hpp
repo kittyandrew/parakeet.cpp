@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <mutex>
 #include "model_loader.hpp"
 #include <vector>
@@ -101,6 +102,10 @@ public:
 
     int num_layers() const { return n_layers_; }
 
+    // True once the embedding table has been copied to the host. A step fetches it even for SOS, so a
+    // warm-up that emits no token still pays the one-time read. For tests.
+    bool embed_table_fetched() const { return embed_fetched_.load(std::memory_order_acquire); }
+
 private:
     const ModelLoader& ml_;
     int H_;       // pred_hidden
@@ -117,6 +122,7 @@ private:
     // PredictionNet is safe to use from several threads.
     mutable std::once_flag embed_once_;
     mutable std::vector<float> embed_host_;
+    mutable std::atomic<bool> embed_fetched_{false};
 };
 
 } // namespace pk

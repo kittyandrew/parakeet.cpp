@@ -42,6 +42,7 @@ const float* PredictionNet::embed_table() const {
         assert(emb && "missing decoder.prediction.embed.weight");
         embed_host_.resize((size_t)vocab_p1_ * H_);
         ggml_backend_tensor_get(emb, embed_host_.data(), 0, ggml_nbytes(emb));
+        embed_fetched_.store(true, std::memory_order_release);
     });
     return embed_host_.data();
 }
