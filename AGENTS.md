@@ -134,6 +134,7 @@ tests/               ctest targets
                        depthwise_conv_cases.hpp, NeMo's depthwise conv on the host and a run of the builder, shared by the three above
                        gpu_devices.hpp         , GPU device list and skip helper for the gpu-labelled tests
                        test_relpos_mask.cpp    , single-clip attention mask == NeMo's, skipped only when it masks nothing; softmax unchanged (model-independent)
+                       test_pos_enc_cache.cpp  , relative position table from the grown cache == a fresh table, any order of lengths, widths, threads (model-independent)
                        test_capi_concurrency.cpp, set_concurrency + concurrent last_error writes (PARAKEET_TEST_GGUF)
                        test_pool_stress.cpp    , N threads x K backends == single-thread results; PARAKEET_STRESS_QUICK=1 for slow builds (PARAKEET_TEST_GGUF, _ULTRA, _REDUX_KEEP)
                        test_pool_shutdown.cpp  , pool create/destroy leaves no threads, results equal (PARAKEET_TEST_GGUF)
