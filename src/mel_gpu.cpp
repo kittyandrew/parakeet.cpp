@@ -45,6 +45,28 @@ std::shared_ptr<const DftBasis> dft_basis(int N, int B) {
     return entry;
 }
 
+void gpu_mel_frames(const std::vector<float>& samples, float preemph, const std::vector<float>& window,
+                    int n_fft, int hop, int T, std::vector<float>& Xw) {
+    // Xw[t*n_fft + i] = (float)(padded[t*hop + i] * (double)window[i]), where padded is the preemphasized
+    // signal (in double, exactly like MelFrontend) centred in n_fft/2 zeros. Each padded sample is computed
+    // where it is read, so no copy of the signal is allocated: two such double arrays took ~7 ms per minute.
+    const int S = (int)samples.size();
+    const int pad = n_fft / 2;
+    auto padded = [&](int j) -> double {
+        const int t = j - pad;
+        if (t < 0 || t >= S) return 0.0;
+        if (preemph > 0.0f && t > 0) return (double)samples[t] - (double)preemph * (double)samples[t - 1];
+        return samples[t];
+    };
+    Xw.resize((size_t)T * n_fft);
+    for (int t = 0; t < T; ++t) {
+        const int start = t * hop;
+        float* row = &Xw[(size_t)t * n_fft];
+        for (int i = 0; i < n_fft; ++i)
+            row[i] = (float)(padded(start + i) * (double)window[i]);
+    }
+}
+
 GpuMel::GpuMel(const ModelLoader& ml) : k_(ml), dft_(dft_basis(k_.n_fft_, k_.n_bins_)) {}
 
 void GpuMel::compute(const std::vector<float>& samples,
@@ -78,22 +100,8 @@ void GpuMel::compute(const std::vector<float>& samples,
     }
 
     // ----- Windowed frame matrix Xw [T, n_fft] row-major (row t = frame t) -----
-    // Xw[t*n_fft + i] = (float)(padded[t*hop + i] * (double)window_[i]), where padded is the preemphasized
-    // signal (in double, exactly like MelFrontend) centred in n_fft/2 zeros. Each padded sample is computed
-    // where it is read, so no copy of the signal is allocated: two such double arrays took ~7 ms per minute.
-    auto padded = [&](int j) -> double {
-        const int t = j - pad;
-        if (t < 0 || t >= S) return 0.0;
-        if (preemph_ > 0.0f && t > 0) return (double)samples[t] - (double)preemph_ * (double)samples[t - 1];
-        return samples[t];
-    };
-    std::vector<float> Xw((size_t)T * n_fft_);
-    for (int t = 0; t < T; ++t) {
-        const int start = t * hop_;
-        float* row = &Xw[(size_t)t * n_fft_];
-        for (int i = 0; i < n_fft_; ++i)
-            row[i] = (float)(padded(start + i) * (double)k_.window_[i]);
-    }
+    std::vector<float> Xw;
+    gpu_mel_frames(samples, preemph_, k_.window_, n_fft_, hop_, T, Xw);
 
     // ----- ggml graph: DFT-matmul -> power -> filterbank -> log -> feat-major -----
     const float guard = k_.log_guard_;

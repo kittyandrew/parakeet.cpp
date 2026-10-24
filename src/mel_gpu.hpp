@@ -21,6 +21,11 @@ struct DftBasis {
 // -sin(...). Built on the first call for a size; later calls for that size return the same object.
 std::shared_ptr<const DftBasis> dft_basis(int n_fft, int n_bins);
 
+// GpuMel's host-side framing: the windowed frame matrix Xw [T, n_fft] row-major (row t = frame t) of the
+// preemphasized signal centred in n_fft/2 zeros, with MelFrontend's double arithmetic. T is the frame count.
+void gpu_mel_frames(const std::vector<float>& samples, float preemph, const std::vector<float>& window,
+                    int n_fft, int hop, int T, std::vector<float>& Xw);
+
 class GpuMel {
 public:
     explicit GpuMel(const ModelLoader& ml);
