@@ -20,7 +20,7 @@ namespace pk {
 // Kept identical to MelFrontend::compute so the per-feature norm matches.
 static constexpr double kNormEps = 1e-5;
 
-static std::shared_ptr<const DftBasis> dft_basis(int N, int B) {
+std::shared_ptr<const DftBasis> dft_basis(int N, int B) {
     static std::mutex mu;
     static std::map<std::pair<int, int>, std::shared_ptr<const DftBasis>> cache;
     std::lock_guard<std::mutex> lock(mu);

@@ -17,6 +17,10 @@ struct DftBasis {
     std::vector<float> cos, sin;
 };
 
+// The DFT basis for n_fft samples and n_bins bins, [n_bins, n_fft] row-major cos(2*pi*b*n/n_fft) and
+// -sin(...). Built on the first call for a size; later calls for that size return the same object.
+std::shared_ptr<const DftBasis> dft_basis(int n_fft, int n_bins);
+
 class GpuMel {
 public:
     explicit GpuMel(const ModelLoader& ml);
