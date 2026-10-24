@@ -40,6 +40,7 @@ pk_add_test(test_depthwise_conv_path)
 # Exits 77 (SKIP) without a GPU device; `ctest -L gpu` runs the GPU tests on a GPU build.
 pk_add_test(test_depthwise_conv_gpu)
 set_tests_properties(test_depthwise_conv_gpu PROPERTIES LABELS "gpu")
+pk_add_test(test_relpos_mask)
 pk_add_test(test_encoder)
 pk_add_test(test_encoder_long)
 pk_add_test(test_encoder_batch)

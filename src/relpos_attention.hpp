@@ -8,6 +8,15 @@ struct ggml_tensor;
 
 namespace pk {
 
+// The additive attention mask of RelPosAttention::build_graph, row-major [T_q, T_k]: 0 where query qi
+// may attend to key kj, -inf where it may not. Keys at or past valid_len are masked, and rows of padded
+// queries stay all 0. With chunk_size > 0, keys outside the chunked-limited window (left_chunks chunks
+// back) are masked too; with att_left >= 0, keys outside [qi - att_left, qi + att_right]. The mask is
+// allocated in `pool`. Returns null, allocating nothing, when no entry would be -inf (valid_len >= T,
+// chunk_size 0, att_left < 0): softmax then runs without a mask.
+const std::vector<float>* relpos_attention_mask(int T, int valid_len, int chunk_size, int left_chunks,
+                                                int att_left, int att_right, GraphInputPool& pool);
+
 // Relative-position multi-head self-attention (Transformer-XL style) as used by
 // the FastConformer encoder — NeMo RelPositionMultiHeadAttention.
 //
